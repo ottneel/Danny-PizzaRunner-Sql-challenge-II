@@ -2,7 +2,7 @@
 1. How many pizzas were ordered? */
 
 select count(order_id) as No_of_pizza_orders
-from customer_orders
+from customer_orders;
 
 --2. How many unique customer orders were made?
 select count(distinct customer_id) as unique_orders
@@ -15,6 +15,7 @@ WHERE pickup_time IS NOT NULL
 	AND cancellation IS NULL;
 
 --4. How many of each type of pizza was delivered?
+-- the query uses a correlated subquery (the outer query depends on the inner query)
 select count(co.order_id) as pizza_count_type, pn.pizza_name
 from customer_orders as co
 inner join pizza_names as pn on  co.pizza_id = pn.pizza_id
@@ -35,7 +36,7 @@ group by co.customer_id, pn.pizza_name
 order by co.customer_id;
 
 --6. What was the maximum number of pizzas delivered in a single order?
-
+-- this query uses a subquery.
 select Max(order_count) as max_order_count
 --inner query to select the count of pizzas, outer query to select the max.
 from (
@@ -61,6 +62,7 @@ group by sq.customer_id;
 
 --8. How many pizzas were delivered that had both exclusions and extras?
 select
+	-- counts the exclusions and extras that are not nulls
 	sum(case when co.exclusions is not null and co.extras is not null then 1 else 0 end) as pizza_with_changes
 from customer_orders as co
 where exists (
@@ -76,10 +78,10 @@ order by hr_of_day;
 
 
 --10.What was the volume of orders for each day of the week?
-SELECT count(co.order_id) as total_volume, datepart(WEEKDAY, co.order_time) as day_of_week
-from customer_orders as co
-group by  datepart(WEEKDAY,co.order_time)
-order by day_of_week;
+SELECT datepart(WEEKDAY, co.order_time) AS day_of_week, count(co.order_id) AS total_volume
+FROM customer_orders AS co
+GROUP BY  datepart(WEEKDAY,co.order_time)
+ORDER BY day_of_week;
 
 
 		--B. Runner and Customer Experience
@@ -92,10 +94,11 @@ group by datepart(week, registration_date);
 
 --2) What was the average time in minutes it took for each runner to arrive at the Pizza Runner HQ to pickup the order?
 
-select ro.runner_id, avg(datediff(minute, co.order_time, ro.pickup_time)) as avg_arrival_time_in_mins
-from customer_orders as co
-inner join runner_orders as ro on co.order_id=ro.order_id
-group by ro.runner_id;
+SELECT ro.runner_id, avg(datediff(minute, co.order_time, ro.pickup_time)) as avg_arrival_time_in_mins
+FROM customer_orders AS co
+INNER JOIN runner_orders AS ro 
+  ON co.order_id=ro.order_id
+GROUP BY ro.runner_id;
 
 --3). Is there any relationship between the number of pizzas and how long the order takes to prepare?
 select datediff(minute, co.order_time, ro.pickup_time) as order_timing, count(co.order_id) no_pizza
@@ -118,13 +121,15 @@ from runner_orders
 /*Avg speed is calulated as distance/time
 so id be using the distance column and the duration coln
 to get the avgspeed per runner*/
-select round((distance/(60*duration)),3) as avg_speed, ro.runner_id
-from runner_orders as ro
+SELECT round((distance/(60*duration)),3) AS avg_speed, ro.runner_id
+FROM runner_orders AS ro
 GROUP BY ro.runner_id, distance,duration;
 
 --7. What is the successful delivery percentage for each runner?
---duration/total(duration)*100
 
+--delivery percentage is = duration/total(duration)*100
+
+--cte to get the total duration of ech runner
 WITH runner_total_duration AS (
     SELECT
         runner_id,
@@ -134,13 +139,15 @@ WITH runner_total_duration AS (
     GROUP BY
         runner_id
 )
+
 SELECT
     r.runner_id,
     r.total_duration,
+	--get the successful delivery percentage and apply a cross join to the sum total of all runners duration.
     concat(round((r.total_duration * 100.0 / tds.sum_duration),2),'%') AS successful_delivery_percentage
 FROM
     runner_total_duration r
-CROSS JOIN
+CROSS JOIN  --cross join to the total sum duration.
     (SELECT SUM(duration) AS sum_duration FROM runner_orders) tds;
 
 
@@ -153,7 +160,7 @@ inner join pizza_toppings as pt on pr.toppings=pt.topping_id
 inner join pizza_names as pn on pn.pizza_id = pr.pizza_id;
 
 
---3. What was the most common exclusion?
+
 /*4. Generate an order item for each record in the customers_orders table in the format of one of the following:
 	Meat Lovers
 	Meat Lovers - Exclude Beef
@@ -190,13 +197,13 @@ SELECT
 	END AS order_item
 FROM (
 	SELECT order_id,
-customer_id,
-pizza_id,
-exclusions,
-extras,
-order_time,
-pizza_name,
-Exclude,
+	customer_id,
+	pizza_id,
+	exclusions,
+	extras,
+	order_time,
+	pizza_name,
+	Exclude,
 	CASE
     WHEN extras IS NULL THEN NULL
     WHEN LEN(extras) = 1 THEN CONCAT('Extra ', topping_name)
@@ -242,51 +249,71 @@ ORDER BY order_id;
 --D. Pricing and Ratings
 
 --1. If a Meat Lovers pizza costs $12 and Vegetarian costs $10 and there were no charges for changes - how much money has Pizza Runner made so far if there are no delivery fees?
-select * from customer_orders as co inner join pizza_names as pn on co.pizza_id=pn.pizza_id inner join runner_orders ro on co.order_id=ro.order_id;
+--select * from customer_orders as co inner join pizza_names as pn on co.pizza_id=pn.pizza_id inner join runner_orders ro on co.order_id=ro.order_id;
 
-select sum(price) as money_made
-from (
-	select pn.pizza_name,
-		(case when pn.pizza_name = 'Meatlovers' and ro.cancellation is null then 12
-		when pn.pizza_name = 'Vegetarian' and ro.cancellation is null then 10
-		end) as price
-	from customer_orders as co
-	inner join pizza_names as pn on co.pizza_id = pn.pizza_id
-	inner join runner_orders as ro on co.order_id=ro.order_id) as subquery
+-- Selecting the sum of money made from pizza sales
+SELECT SUM(price) AS money_made
+FROM (
+    -- Subquery to calculate the price of each pizza based on its name and cancellation status
+    SELECT 
+        pn.pizza_name,
+        (
+            CASE 
+                WHEN pn.pizza_name = 'Meatlovers' AND ro.cancellation IS NULL THEN 12 -- Price for Meatlovers if not cancelled
+                WHEN pn.pizza_name = 'Vegetarian' AND ro.cancellation IS NULL THEN 10 -- Price for Vegetarian if not cancelled
+            END
+        ) AS price
+    FROM 
+        customer_orders AS co
+    INNER JOIN 
+        pizza_names AS pn ON co.pizza_id = pn.pizza_id
+    INNER JOIN 
+        runner_orders AS ro ON co.order_id = ro.order_id
+) AS subquery;
+
 
 --2. What if there was an additional $1 charge for any pizza extras?
-select sum(price) as money_made
-from (
-	select pn.pizza_name,
-		(case when pn.pizza_name = 'Meatlovers' and ro.cancellation is null then 12
-		when pn.pizza_name = 'Vegetarian' and ro.cancellation is null then 10
-		end) as price
-	from customer_orders as co
-	inner join pizza_names as pn on co.pizza_id = pn.pizza_id
-	inner join runner_orders as ro on co.order_id=ro.order_id) as subquery
 
-with price_cte as (
-	select subquery.pizza_name, (
-		case when subquery.extras is not null then 13
-		else price
-		end) as price_with_extra_charge
-	from (
-		select pn.pizza_name ,co.extras,
-			(case when pn.pizza_name = 'Meatlovers' and ro.cancellation is null then 12
-			when pn.pizza_name = 'Vegetarian' and ro.cancellation is null then 10
-			end) as price
-		from customer_orders as co
-		inner join pizza_names as pn on co.pizza_id = pn.pizza_id
-		inner join runner_orders as ro on co.order_id=ro.order_id) as subquery
+-- Common Table Expression (CTE) to calculate the charge if the price is increased by $1
+WITH price_cte AS (
+    -- Subquery to determine the price of each pizza with an additional charge if extras are present
+    SELECT 
+        subquery.pizza_name, 
+        (
+            CASE 
+                WHEN subquery.extras IS NOT NULL THEN 13 -- If extras are present, charge $13
+                ELSE price -- Otherwise, use the original price
+            END
+        ) AS price_with_extra_charge
+    FROM (
+        -- Subquery to calculate the original price of each pizza based on its name and cancellation status
+        SELECT 
+            pn.pizza_name, 
+            co.extras,
+            (
+                CASE 
+                    WHEN pn.pizza_name = 'Meatlovers' AND ro.cancellation IS NULL THEN 12 -- Price for Meatlovers if not cancelled
+                    WHEN pn.pizza_name = 'Vegetarian' AND ro.cancellation IS NULL THEN 10 -- Price for Vegetarian if not cancelled
+                END
+            ) AS price
+        FROM 
+            customer_orders AS co
+        INNER JOIN 
+            pizza_names AS pn ON co.pizza_id = pn.pizza_id
+        INNER JOIN 
+            runner_orders AS ro ON co.order_id = ro.order_id
+    ) AS subquery -- Subquery alias
 )
+-- Query to sum up the prices with the extra charge
+SELECT SUM(price_with_extra_charge) AS price_with_extra_charge
+FROM price_cte; -- Selecting the sum of prices with the extra charge
 
-select sum(price_with_extra_charge) as price_with_extra_charge
-from price_cte
 
 /*3. The Pizza Runner team now wants to add an additional ratings system that allows customers to rate their runner, 
 how would you design an additional table for this new dataset -
 generate a schema for this new table and insert your own data for ratings for each successful customer order between 1 to 5.*/
 
+--i based the ratings off the speed of the runner from 1- indicating one star for runners who took the most time and 5 - fr 5 star for runners who took the least time.
 
 select runner_id,
 	(case when ro.cancellation is not null then null
@@ -298,6 +325,8 @@ select runner_id,
 	end ) as ratings
 into runner_ratings
 from runner_orders as ro;
+
+select * from runner_ratings
 
 /* 4 Using your newly generated table - can you join all of the information together 
 to form a table which has the following information for successful deliveries?
@@ -321,15 +350,27 @@ inner join runner_ratings as rr on ro.runner_id=rr.runner_id;
 /* 5. If a Meat Lovers pizza was $12 and Vegetarian $10 fixed prices with no cost for extras and each runner is paid $0.30 per kilometre traveled 
 - how much money does Pizza Runner have left over after these deliveries?*/
 
-with rf_cte as (
-	select pn.pizza_name,
-		(case when pn.pizza_name = 'Meatlovers' and ro.cancellation is null then 12
-		when pn.pizza_name = 'Vegetarian' and ro.cancellation is null then 10
-		end) as price, (ro.distance*0.30) as runner_fees
-	from customer_orders as co
-	inner join pizza_names as pn on co.pizza_id = pn.pizza_id
-	inner join runner_orders as ro on co.order_id=ro.order_id)
+-- Common Table Expression (CTE) to calculate runner fees and price for each pizza
+WITH rf_cte AS (
+    -- Subquery to calculate the price and runner fees for each pizza
+    SELECT 
+        pn.pizza_name,
+        (
+            CASE 
+                WHEN pn.pizza_name = 'Meatlovers' AND ro.cancellation IS NULL THEN 12 -- Price for Meatlovers if not cancelled
+                WHEN pn.pizza_name = 'Vegetarian' AND ro.cancellation IS NULL THEN 10 -- Price for Vegetarian if not cancelled
+            END
+        ) AS price, -- Calculating pizza price
+        (ro.distance * 0.30) AS runner_fees -- Calculating runner fees based on distance
+    FROM 
+        customer_orders AS co
+    INNER JOIN 
+        pizza_names AS pn ON co.pizza_id = pn.pizza_id
+    INNER JOIN 
+        runner_orders AS ro ON co.order_id = ro.order_id
+)
+-- Query to calculate the remaining amount after deducting runner fees from the price
+SELECT SUM(rf_cte.price - rf_cte.runner_fees) AS left_after_deliveries
+FROM rf_cte; -- Selecting the sum of remaining amount after deliveries
 
-select sum(rf_cte.price - rf_cte.runner_fees) as left_after_deliveries
-from rf_cte
 
